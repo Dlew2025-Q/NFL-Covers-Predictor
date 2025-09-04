@@ -4,7 +4,7 @@ from flask_cors import CORS
 import nfl_data_py as nfl
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from urllib.error import HTTPError
 
@@ -36,7 +36,6 @@ def get_team_stats():
         current_year = now.year
         df_team_games = pd.DataFrame() # Initialize an empty DataFrame
 
-        # --- THIS IS THE FINAL, DEFINITIVE LOGIC ---
         # First, try to get the current year's data using the weekly endpoint.
         try:
             app.logger.info(f"Attempting to fetch NFL stats for the {current_year} season using 'import_weekly_data'.")
@@ -147,7 +146,7 @@ def get_nfl_predictions():
     """ The main API endpoint that combines all data and returns predictions. """
     global cached_data, last_fetch_time
 
-    if cached_data and last_fetch_time and (datetime.utcnow() - last_fetch_time) < timedelta(minutes=CACHE_DURATION_MINUTES):
+    if cached_data and last_fetch_time and (datetime.now(timezone.utc) - last_fetch_time) < timedelta(minutes=CACHE_DURATION_MINUTES):
         app.logger.info("Returning cached data.")
         return jsonify(cached_data)
 
@@ -159,13 +158,15 @@ def get_nfl_predictions():
     team_stats = get_team_stats()
     odds_data = get_nfl_odds()
 
-    if team_stats is None or not odds_data: # Also check for empty odds list
+    if team_stats is None or not odds_data:
         app.logger.error(f"Failed to fetch data. Stats fetched: {'Yes' if team_stats is not None else 'No'}. Odds fetched: {'Yes' if odds_data else 'No'}")
         abort(503, description="Failed to fetch data from one or more external sources.")
 
     all_games = transform_api_data(odds_data)
     
-    today = datetime.utcnow()
+    # --- THIS IS THE CORRECTED DATE LOGIC ---
+    # Use timezone.utc to make all datetime objects 'aware'
+    today = datetime.now(timezone.utc)
     days_since_thursday = (today.weekday() - 3) % 7
     start_of_week = (today - timedelta(days=days_since_thursday)).replace(hour=0, minute=0, second=0, microsecond=0)
     end_of_week = start_of_week + timedelta(days=7)
@@ -192,7 +193,7 @@ def get_nfl_predictions():
     predictions.sort(key=lambda x: x['gameTime'])
 
     cached_data = predictions
-    last_fetch_time = datetime.utcnow()
+    last_fetch_time = datetime.now(timezone.utc)
     app.logger.info(f"Successfully fetched and processed {len(predictions)} predictions.")
     return jsonify(predictions)
 
