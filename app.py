@@ -1,5 +1,5 @@
 import os
-from flask import Flask, jsonify, send_from_directory, abort, Blueprint
+from flask import Flask, jsonify, send_from_directory, abort
 from flask_cors import CORS
 import nfl_data_py as nfl
 import pandas as pd
@@ -21,9 +21,6 @@ THE_ODDS_API_KEY = os.environ.get('THE_ODDS_API_KEY')
 cached_data = None
 last_fetch_time = None
 CACHE_DURATION_MINUTES = 30
-
-# --- API BLUEPRINT (for better route organization) ---
-api_bp = Blueprint('api', __name__, url_prefix='/api')
 
 # --- DATA FETCHING AND PROCESSING ---
 def get_team_stats():
@@ -100,8 +97,14 @@ def calculate_cover_probability(game, all_team_stats):
     probability = 50 + (value_difference * 2.5)
     return max(5, min(95, probability))
 
-# --- API ENDPOINT (now attached to the Blueprint) ---
-@api_bp.route('/nfl-predictions')
+# --- HEALTH CHECK ROUTE (for debugging) ---
+@app.route('/health')
+def health_check():
+    """ A simple endpoint to confirm the server is running. """
+    return jsonify({"status": "ok"})
+
+# --- API ENDPOINT ---
+@app.route('/api/nfl-predictions')
 def get_nfl_predictions():
     """ The main API endpoint that combines all data and returns predictions. """
     global cached_data, last_fetch_time
@@ -154,12 +157,16 @@ def get_nfl_predictions():
     app.logger.info(f"Successfully fetched and processed {len(predictions)} predictions.")
     return jsonify(predictions)
 
-# Register the Blueprint with the main Flask app
-app.register_blueprint(api_bp)
-
-# --- SERVE FRONTEND (This is the corrected, simpler route) ---
+# --- SERVE FRONTEND ---
 @app.route('/')
 def serve_index():
     """ Serves the main index.html file for the root URL. """
     return send_from_directory(app.static_folder, 'index.html')
+
+# --- PRINT ROUTES AT STARTUP for debugging ---
+with app.app_context():
+    app.logger.info("--- REGISTERED ROUTES ---")
+    for rule in app.url_map.iter_rules():
+        app.logger.info(f"Endpoint: {rule.endpoint} -> URL: {rule.rule}")
+    app.logger.info("-------------------------")
 
