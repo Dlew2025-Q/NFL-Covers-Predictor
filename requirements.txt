@@ -1,0 +1,6 @@
+Flask
+Flask-Cors
+gunicorn
+nfl_data_py
+pandas
+requests
