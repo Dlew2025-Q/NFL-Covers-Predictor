@@ -36,11 +36,9 @@ def get_team_stats():
         current_year = now.year
         df = pd.DataFrame() # Initialize an empty DataFrame
 
-        # --- THIS IS THE FINAL, MOST ROBUST LOGIC ---
         # First, try to get the current year's data.
         try:
             app.logger.info(f"Attempting to fetch NFL stats for the {current_year} season.")
-            # Load the FULL dataset without specifying columns to avoid KeyErrors on download.
             df = nfl.import_weekly_data([current_year])
         except HTTPError as e:
             if e.code == 404:
@@ -58,15 +56,21 @@ def get_team_stats():
                 app.logger.error(f"CRITICAL: No weekly data found for {last_year} either. Cannot provide stats.")
                 return None
 
-        app.logger.info(f"Successfully loaded data for the {df['season'].iloc[0]} season.")
+        # --- ENHANCED LOGGING AND ROBUST COLUMN SELECTION ---
+        app.logger.info(f"Successfully loaded data for the {df['season'].iloc[0]} season. Shape: {df.shape}. Columns: {df.columns.tolist()}")
         
-        # Now that data is loaded, safely select the columns we need.
-        required_cols = ['team', 'season', 'week', 'result', 'spread_line', 'points_for', 'points_against']
-        df = df[required_cols]
-
-        df['ats_result'] = 'push'
-        df.loc[df['result'] + df['spread_line'] > 0, 'ats_result'] = 'win'
-        df.loc[df['result'] + df['spread_line'] < 0, 'ats_result'] = 'loss'
+        # Define all columns we might need and check which ones are actually available
+        base_cols = ['team', 'season', 'week']
+        stat_cols = ['result', 'spread_line', 'points_for', 'points_against']
+        available_cols = base_cols + [col for col in stat_cols if col in df.columns]
+        
+        if 'result' not in available_cols or 'spread_line' not in available_cols:
+             app.logger.warning("ATS stats cannot be calculated; 'result' or 'spread_line' column missing.")
+             df['ats_result'] = 'push' # Default value
+        else:
+            df['ats_result'] = 'push'
+            df.loc[df['result'] + df['spread_line'] > 0, 'ats_result'] = 'win'
+            df.loc[df['result'] + df['spread_line'] < 0, 'ats_result'] = 'loss'
 
         team_stats = df.groupby('team').agg(
             ppg=('points_for', 'mean'),
@@ -93,7 +97,10 @@ def get_nfl_odds():
     try:
         response = requests.get(api_url)
         response.raise_for_status()
-        return response.json()
+        json_response = response.json()
+        if not json_response:
+             app.logger.warning("The Odds API returned an empty list of games.")
+        return json_response
     except requests.exceptions.RequestException as e:
         app.logger.error(f"CRITICAL ERROR in get_nfl_odds: {e}", exc_info=True)
         return None
@@ -149,8 +156,8 @@ def get_nfl_predictions():
     team_stats = get_team_stats()
     odds_data = get_nfl_odds()
 
-    if not team_stats or not odds_data:
-        app.logger.error(f"Failed to fetch data. Stats fetched: {'Yes' if team_stats else 'No'}. Odds fetched: {'Yes' if odds_data else 'No'}")
+    if team_stats is None or odds_data is None:
+        app.logger.error(f"Failed to fetch data. Stats fetched: {'Yes' if team_stats is not None else 'No'}. Odds fetched: {'Yes' if odds_data is not None else 'No'}")
         abort(503, description="Failed to fetch data from one or more external sources.")
 
     all_games = transform_api_data(odds_data)
