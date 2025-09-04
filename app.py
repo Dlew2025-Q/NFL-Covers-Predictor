@@ -1,5 +1,5 @@
 import os
-from flask import Flask, jsonify, send_from_directory, abort
+from flask import Flask, jsonify, abort
 from flask_cors import CORS
 import nfl_data_py as nfl
 import pandas as pd
@@ -14,10 +14,9 @@ logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 # --- CORS Configuration ---
-# Allow requests from your frontend's domain
-frontend_url = os.environ.get('FRONTEND_URL', '*') # Use an env var for flexibility
+# Allow requests from your frontend's domain. '*' is a fallback for development.
+frontend_url = os.environ.get('FRONTEND_URL', '*') 
 CORS(app, resources={r"/api/*": {"origins": frontend_url}})
-
 
 # --- CONFIGURATION ---
 THE_ODDS_API_KEY = os.environ.get('THE_ODDS_API_KEY')
@@ -30,20 +29,26 @@ CACHE_DURATION_MINUTES = 30
 # --- DATA FETCHING AND PROCESSING ---
 
 def get_team_stats():
-    """ Fetches team statistics using nfl_data_py, handling the offseason. """
+    """ Fetches team statistics using nfl_data_py, handling the offseason and start-of-season edge cases. """
     try:
         now = datetime.now()
-        # If it's before September, the new season hasn't started. Use last season's data.
-        current_year = now.year if now.month >= 9 else now.year - 1
-        app.logger.info(f"Fetching NFL stats for the {current_year} season.")
-
+        current_year = now.year
         cols = ['team', 'season', 'week', 'result', 'spread_line', 'points_for', 'points_against']
+
+        # First, try to get the current year's data
+        app.logger.info(f"Attempting to fetch NFL stats for the {current_year} season.")
         df = nfl.import_weekly_data([current_year], columns=cols)
         
+        # If the current season's data is empty (e.g., season just started), fall back to the previous season.
         if df.empty:
-            app.logger.warning(f"No weekly data returned from nfl_data_py for {current_year}.")
-            return None
+            last_year = current_year - 1
+            app.logger.warning(f"No weekly data found for {current_year}. Falling back to {last_year} season data.")
+            df = nfl.import_weekly_data([last_year], columns=cols)
+            if df.empty:
+                app.logger.error(f"CRITICAL: No weekly data found for {last_year} either. Cannot provide stats.")
+                return None
 
+        app.logger.info(f"Successfully loaded data for the {df['season'].iloc[0]} season.")
         df['ats_result'] = 'push'
         df.loc[df['result'] + df['spread_line'] > 0, 'ats_result'] = 'win'
         df.loc[df['result'] + df['spread_line'] < 0, 'ats_result'] = 'loss'
