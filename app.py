@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 
 # --- Initialize Flask App ---
 # The static_folder is pointed to the 'static' directory where index.html lives.
-app = Flask(__name__, static_folder='static', static_url_path='')
+app = Flask(__name__, static_folder='static')
 CORS(app)
 
 # --- CONFIGURATION ---
@@ -159,4 +159,5 @@ def get_nfl_predictions():
 def serve_index():
     """ Serves the index.html file from the static folder. """
     return send_from_directory(app.static_folder, 'index.html')
+
 
