@@ -159,15 +159,4 @@ def get_nfl_predictions():
 def serve_index():
     """ Serves the index.html file from the static folder. """
     return send_from_directory(app.static_folder, 'index.html')
-```
-
-### Next Steps
-
-1.  **Update `app.py`:** Replace the code in your `app.py` file on your local machine with the new code above.
-2.  **Commit and Push:** Save the change, and then commit and push it to your GitHub repository.
-    ```bash
-    git add app.py
-    git commit -m "Fix API route and add error handling"
-    git push
-    
 
