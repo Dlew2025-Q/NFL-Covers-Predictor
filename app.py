@@ -164,11 +164,13 @@ def get_nfl_predictions():
 
     all_games = transform_api_data(odds_data)
     
-    # --- THIS IS THE CORRECTED DATE LOGIC ---
-    # Use timezone.utc to make all datetime objects 'aware'
+    # --- THIS IS THE DEFINITIVE DATE LOGIC ---
+    # Use timezone.utc to make all datetime objects 'aware' and comparable.
     today = datetime.now(timezone.utc)
-    days_since_thursday = (today.weekday() - 3) % 7
-    start_of_week = (today - timedelta(days=days_since_thursday)).replace(hour=0, minute=0, second=0, microsecond=0)
+    # Calculate the date of the most recent Thursday
+    start_of_week_date = today.date() - timedelta(days=((today.weekday() - 3) % 7))
+    # Create a timezone-aware datetime object for the beginning of that day in UTC
+    start_of_week = datetime.combine(start_of_week_date, datetime.min.time(), tzinfo=timezone.utc)
     end_of_week = start_of_week + timedelta(days=7)
     
     current_week_games = [
