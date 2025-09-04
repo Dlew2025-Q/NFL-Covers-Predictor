@@ -34,32 +34,36 @@ def get_team_stats():
     try:
         now = datetime.now()
         current_year = now.year
-        cols = ['team', 'season', 'week', 'result', 'spread_line', 'points_for', 'points_against']
         df = pd.DataFrame() # Initialize an empty DataFrame
 
-        # --- THIS IS THE CORRECTED LOGIC ---
-        # First, try to get the current year's data, but anticipate that it might not exist yet.
+        # --- THIS IS THE FINAL, MOST ROBUST LOGIC ---
+        # First, try to get the current year's data.
         try:
             app.logger.info(f"Attempting to fetch NFL stats for the {current_year} season.")
-            df = nfl.import_weekly_data([current_year], columns=cols)
+            # Load the FULL dataset without specifying columns to avoid KeyErrors on download.
+            df = nfl.import_weekly_data([current_year])
         except HTTPError as e:
-            # If we get a 404 error, it means the season's data file isn't available yet. This is expected.
             if e.code == 404:
                 app.logger.warning(f"Data for {current_year} not found (404 Error). This is normal before the season starts.")
-                df = pd.DataFrame() # Ensure df is empty to trigger fallback
+                df = pd.DataFrame()
             else:
-                raise # Re-raise other HTTP errors
+                raise
         
         # If the current season's data is empty, fall back to the previous season.
         if df.empty:
             last_year = current_year - 1
             app.logger.warning(f"No weekly data found for {current_year}. Falling back to {last_year} season data.")
-            df = nfl.import_weekly_data([last_year], columns=cols)
+            df = nfl.import_weekly_data([last_year])
             if df.empty:
                 app.logger.error(f"CRITICAL: No weekly data found for {last_year} either. Cannot provide stats.")
                 return None
 
         app.logger.info(f"Successfully loaded data for the {df['season'].iloc[0]} season.")
+        
+        # Now that data is loaded, safely select the columns we need.
+        required_cols = ['team', 'season', 'week', 'result', 'spread_line', 'points_for', 'points_against']
+        df = df[required_cols]
+
         df['ats_result'] = 'push'
         df.loc[df['result'] + df['spread_line'] > 0, 'ats_result'] = 'win'
         df.loc[df['result'] + df['spread_line'] < 0, 'ats_result'] = 'loss'
