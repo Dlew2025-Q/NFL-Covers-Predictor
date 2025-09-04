@@ -6,6 +6,7 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 import logging
+from urllib.error import HTTPError
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -34,12 +35,22 @@ def get_team_stats():
         now = datetime.now()
         current_year = now.year
         cols = ['team', 'season', 'week', 'result', 'spread_line', 'points_for', 'points_against']
+        df = pd.DataFrame() # Initialize an empty DataFrame
 
-        # First, try to get the current year's data
-        app.logger.info(f"Attempting to fetch NFL stats for the {current_year} season.")
-        df = nfl.import_weekly_data([current_year], columns=cols)
+        # --- THIS IS THE CORRECTED LOGIC ---
+        # First, try to get the current year's data, but anticipate that it might not exist yet.
+        try:
+            app.logger.info(f"Attempting to fetch NFL stats for the {current_year} season.")
+            df = nfl.import_weekly_data([current_year], columns=cols)
+        except HTTPError as e:
+            # If we get a 404 error, it means the season's data file isn't available yet. This is expected.
+            if e.code == 404:
+                app.logger.warning(f"Data for {current_year} not found (404 Error). This is normal before the season starts.")
+                df = pd.DataFrame() # Ensure df is empty to trigger fallback
+            else:
+                raise # Re-raise other HTTP errors
         
-        # If the current season's data is empty (e.g., season just started), fall back to the previous season.
+        # If the current season's data is empty, fall back to the previous season.
         if df.empty:
             last_year = current_year - 1
             app.logger.warning(f"No weekly data found for {current_year}. Falling back to {last_year} season data.")
