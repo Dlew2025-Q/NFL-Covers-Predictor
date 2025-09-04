@@ -1,27 +1,27 @@
-# Required libraries: Flask, nfl_data_py, pandas, requests, gunicorn
-# You can install them using pip:
-# pip install -r requirements.txt
-
 import os
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, abort
 from flask_cors import CORS
 import nfl_data_py as nfl
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
+import logging
 
-app = Flask(__name__, static_folder='static')
+# --- Setup Logging ---
+logging.basicConfig(level=logging.INFO)
+
+# --- Initialize Flask App ---
+# The static_folder is pointed to the 'static' directory where index.html lives.
+app = Flask(__name__, static_folder='static', static_url_path='')
 CORS(app)
 
 # --- CONFIGURATION ---
-# Read the API key from an environment variable for security
 THE_ODDS_API_KEY = os.environ.get('THE_ODDS_API_KEY')
 
 # --- CACHING ---
-# Simple in-memory cache to avoid hitting APIs on every request
 cached_data = None
 last_fetch_time = None
-CACHE_DURATION_MINUTES = 30 # Cache data for 30 minutes
+CACHE_DURATION_MINUTES = 30
 
 # --- DATA FETCHING AND PROCESSING ---
 
@@ -29,7 +29,9 @@ def get_team_stats():
     """ Fetches the latest team statistics using nfl_data_py. """
     try:
         current_year = datetime.now().year
-        df = nfl.import_weekly_data([current_year])
+        # Specifying columns can speed up the import
+        cols = ['team', 'season', 'week', 'result', 'spread_line', 'points_for', 'points_against']
+        df = nfl.import_weekly_data([current_year], columns=cols)
         
         df['ats_result'] = 'push'
         df.loc[df['result'] + df['spread_line'] > 0, 'ats_result'] = 'win'
@@ -51,7 +53,7 @@ def get_team_stats():
         final_stats = {abbr_to_name[abbr]: data for abbr, data in team_stats_dict.items() if abbr in abbr_to_name}
         return final_stats
     except Exception as e:
-        print(f"Error fetching stats from nfl_data_py: {e}")
+        app.logger.error(f"Error fetching stats from nfl_data_py: {e}")
         return None
 
 def get_nfl_odds():
@@ -62,7 +64,7 @@ def get_nfl_odds():
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching odds from The Odds API: {e}")
+        app.logger.error(f"Error fetching odds from The Odds API: {e}")
         return None
 
 def transform_api_data(api_games):
@@ -85,17 +87,13 @@ def transform_api_data(api_games):
         })
     return games
 
-# --- CALCULATION LOGIC ---
 def calculate_cover_probability(game, all_team_stats):
     """ Calculates the estimated cover probability for the favorite. """
     home_stats = all_team_stats.get(game['homeTeam'])
     away_stats = all_team_stats.get(game['awayTeam'])
-
     if not home_stats or not away_stats: return 50.0
-
     home_power = home_stats['ppg'] - home_stats['opp_ppg']
     away_power = away_stats['ppg'] - away_stats['opp_ppg']
-    
     projected_spread = away_power - home_power - 2.5
     actual_line = game['line'] if game['favorite'] == game['homeTeam'] else -game['line']
     value_difference = projected_spread - actual_line
@@ -108,20 +106,20 @@ def get_nfl_predictions():
     """ The main API endpoint that combines all data and returns predictions. """
     global cached_data, last_fetch_time
 
-    # Check if cached data is still valid
     if cached_data and last_fetch_time and (datetime.utcnow() - last_fetch_time) < timedelta(minutes=CACHE_DURATION_MINUTES):
-        print("Returning cached data.")
+        app.logger.info("Returning cached data.")
         return jsonify(cached_data)
 
-    print("Fetching new data.")
+    app.logger.info("Fetching new data from APIs.")
     if not THE_ODDS_API_KEY:
-        return jsonify({"error": "API key is not configured on the server."}), 500
+        app.logger.error("THE_ODDS_API_KEY environment variable not set.")
+        abort(500, description="API key is not configured on the server.")
 
     team_stats = get_team_stats()
     odds_data = get_nfl_odds()
 
     if not team_stats or not odds_data:
-        return jsonify({"error": "Failed to fetch data from one or more sources."}), 500
+        abort(503, description="Failed to fetch data from one or more external sources.")
 
     all_games = transform_api_data(odds_data)
     
@@ -151,10 +149,9 @@ def get_nfl_predictions():
     
     predictions.sort(key=lambda x: x['gameTime'])
 
-    # Update cache
     cached_data = predictions
     last_fetch_time = datetime.utcnow()
-
+    app.logger.info(f"Successfully fetched and processed {len(predictions)} predictions.")
     return jsonify(predictions)
 
 # --- SERVE FRONTEND ---
@@ -162,6 +159,15 @@ def get_nfl_predictions():
 def serve_index():
     """ Serves the index.html file from the static folder. """
     return send_from_directory(app.static_folder, 'index.html')
+```
 
-# Note: The if __name__ == '__main__': block is removed as it's not used by production servers like Gunicorn.
+### Next Steps
+
+1.  **Update `app.py`:** Replace the code in your `app.py` file on your local machine with the new code above.
+2.  **Commit and Push:** Save the change, and then commit and push it to your GitHub repository.
+    ```bash
+    git add app.py
+    git commit -m "Fix API route and add error handling"
+    git push
+    
 
