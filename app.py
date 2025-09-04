@@ -34,45 +34,48 @@ def get_team_stats():
     try:
         now = datetime.now()
         current_year = now.year
-        df = pd.DataFrame() # Initialize an empty DataFrame
+        df_team_games = pd.DataFrame() # Initialize an empty DataFrame
 
-        # First, try to get the current year's data.
+        # --- THIS IS THE FINAL, DEFINITIVE LOGIC ---
+        # First, try to get the current year's data using the weekly endpoint.
         try:
-            app.logger.info(f"Attempting to fetch NFL stats for the {current_year} season.")
-            df = nfl.import_weekly_data([current_year])
+            app.logger.info(f"Attempting to fetch NFL stats for the {current_year} season using 'import_weekly_data'.")
+            df_weekly = nfl.import_weekly_data([current_year])
+            # Check if it returned team data or player data
+            if 'team' in df_weekly.columns and 'result' in df_weekly.columns:
+                df_team_games = df_weekly
         except HTTPError as e:
             if e.code == 404:
-                app.logger.warning(f"Data for {current_year} not found (404 Error). This is normal before the season starts.")
-                df = pd.DataFrame()
+                app.logger.warning(f"Weekly data for {current_year} not found (404 Error). This is normal before the season starts.")
             else:
-                raise
+                raise # Re-raise other unexpected HTTP errors
         
-        # If the current season's data is empty, fall back to the previous season.
-        if df.empty:
+        # If we failed to get team data for the current year, fall back to last year's SCHEDULE data.
+        if df_team_games.empty:
             last_year = current_year - 1
-            app.logger.warning(f"No weekly data found for {current_year}. Falling back to {last_year} season data.")
-            df = nfl.import_weekly_data([last_year])
-            if df.empty:
-                app.logger.error(f"CRITICAL: No weekly data found for {last_year} either. Cannot provide stats.")
+            app.logger.warning(f"Could not get weekly team data for {current_year}. Falling back to {last_year} schedule data.")
+            df_schedule = nfl.import_schedules([last_year])
+            
+            if df_schedule.empty:
+                app.logger.error(f"CRITICAL: No schedule data found for {last_year} either. Cannot provide stats.")
                 return None
+            
+            app.logger.info(f"Successfully loaded schedule data for {last_year}. Processing into team stats.")
+            # Reshape schedule data into a format similar to weekly data
+            home = df_schedule[['home_team', 'home_score', 'away_score', 'spread_line', 'result']].rename(columns={'home_team': 'team', 'home_score': 'points_for', 'away_score': 'points_against'})
+            away = df_schedule[['away_team', 'away_score', 'home_score', 'spread_line', 'result']].rename(columns={'away_team': 'team', 'away_score': 'points_for', 'home_score': 'points_against'})
+            # For away teams, the result needs to be inverted, and the spread line needs to be inverted.
+            away['result'] = -away['result']
+            away['spread_line'] = -away['spread_line']
+            df_team_games = pd.concat([home, away]).reset_index(drop=True)
 
-        # --- ENHANCED LOGGING AND ROBUST COLUMN SELECTION ---
-        app.logger.info(f"Successfully loaded data for the {df['season'].iloc[0]} season. Shape: {df.shape}. Columns: {df.columns.tolist()}")
-        
-        # Define all columns we might need and check which ones are actually available
-        base_cols = ['team', 'season', 'week']
-        stat_cols = ['result', 'spread_line', 'points_for', 'points_against']
-        available_cols = base_cols + [col for col in stat_cols if col in df.columns]
-        
-        if 'result' not in available_cols or 'spread_line' not in available_cols:
-             app.logger.warning("ATS stats cannot be calculated; 'result' or 'spread_line' column missing.")
-             df['ats_result'] = 'push' # Default value
-        else:
-            df['ats_result'] = 'push'
-            df.loc[df['result'] + df['spread_line'] > 0, 'ats_result'] = 'win'
-            df.loc[df['result'] + df['spread_line'] < 0, 'ats_result'] = 'loss'
+        app.logger.info(f"Successfully prepared team game data. Shape: {df_team_games.shape}. Columns: {df_team_games.columns.tolist()}")
 
-        team_stats = df.groupby('team').agg(
+        df_team_games['ats_result'] = 'push'
+        df_team_games.loc[df_team_games['result'] + df_team_games['spread_line'] > 0, 'ats_result'] = 'win'
+        df_team_games.loc[df_team_games['result'] + df_team_games['spread_line'] < 0, 'ats_result'] = 'loss'
+
+        team_stats = df_team_games.groupby('team').agg(
             ppg=('points_for', 'mean'),
             opp_ppg=('points_against', 'mean'),
             ats_wins=('ats_result', lambda x: (x == 'win').sum()),
@@ -156,8 +159,8 @@ def get_nfl_predictions():
     team_stats = get_team_stats()
     odds_data = get_nfl_odds()
 
-    if team_stats is None or odds_data is None:
-        app.logger.error(f"Failed to fetch data. Stats fetched: {'Yes' if team_stats is not None else 'No'}. Odds fetched: {'Yes' if odds_data is not None else 'No'}")
+    if team_stats is None or not odds_data: # Also check for empty odds list
+        app.logger.error(f"Failed to fetch data. Stats fetched: {'Yes' if team_stats is not None else 'No'}. Odds fetched: {'Yes' if odds_data else 'No'}")
         abort(503, description="Failed to fetch data from one or more external sources.")
 
     all_games = transform_api_data(odds_data)
