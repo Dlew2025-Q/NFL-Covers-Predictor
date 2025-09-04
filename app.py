@@ -188,8 +188,24 @@ def get_nfl_predictions():
             if favorite_stats['ats_pushes'] > 0:
                  ats_record += f"-{int(favorite_stats['ats_pushes'])}"
 
+        # --- NEW LOGIC TO PICK THE WINNER AGAINST THE SPREAD ---
+        prediction_pick = "Too close to call"
+        # We use a small buffer (e.g., 52%) to make the pick more confident
+        if probability > 52:
+            line_str = f"{game['line']}" if game['line'] < 0 else f"+{game['line']}"
+            prediction_pick = f"{game['favorite']} {line_str}"
+        elif probability < 48:
+            underdog = game['homeTeam'] if game['favorite'] == game['awayTeam'] else game['awayTeam']
+            # The underdog's line is the inverse of the favorite's line
+            underdog_line = -game['line']
+            line_str = f"{underdog_line}" if underdog_line < 0 else f"+{underdog_line}"
+            prediction_pick = f"{underdog} {line_str}"
+
         predictions.append({
-            **game, 'cover_probability': round(probability, 1), 'favorite_ats_record': ats_record
+            **game, 
+            'cover_probability': round(probability, 1), 
+            'favorite_ats_record': ats_record,
+            'prediction_pick': prediction_pick  # Add the new pick to the response
         })
     
     predictions.sort(key=lambda x: x['gameTime'])
@@ -204,4 +220,5 @@ def get_nfl_predictions():
 def health_check():
     """ A simple health check to confirm the server is running. """
     return "Backend is running."
+
 
