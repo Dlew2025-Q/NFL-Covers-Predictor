@@ -95,7 +95,6 @@ def get_team_stats():
 
 def get_nfl_odds():
     """ Fetches live NFL odds from The Odds API. """
-    # --- THIS IS THE CORRECTED LINE ---
     api_url = f"https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds/?apiKey={THE_ODDS_API_KEY}&regions=us&markets=spreads,h2h&oddsFormat=american"
     try:
         response = requests.get(api_url)
@@ -133,8 +132,8 @@ def calculate_cover_probability(game, all_team_stats):
     home_stats = all_team_stats.get(game['homeTeam'])
     away_stats = all_team_stats.get(game['awayTeam'])
     if not home_stats or not away_stats: return 50.0
-    home_power = home_stats['ppg'] - home_stats['opp_ppg']
-    away_power = away_stats['ppg'] - away_stats['opp_ppg']
+    home_power = home_stats.get('ppg', 0) - home_stats.get('opp_ppg', 0)
+    away_power = away_stats.get('ppg', 0) - away_stats.get('opp_ppg', 0)
     projected_spread = away_power - home_power - 2.5
     actual_line = game['line'] if game['favorite'] == game['homeTeam'] else -game['line']
     value_difference = projected_spread - actual_line
@@ -165,11 +164,8 @@ def get_nfl_predictions():
 
     all_games = transform_api_data(odds_data)
     
-    # Use timezone.utc to make all datetime objects 'aware' and comparable.
     today = datetime.now(timezone.utc)
-    # Calculate the date of the most recent Thursday
     start_of_week_date = today.date() - timedelta(days=((today.weekday() - 3) % 7))
-    # Create a timezone-aware datetime object for the beginning of that day in UTC
     start_of_week = datetime.combine(start_of_week_date, datetime.min.time(), tzinfo=timezone.utc)
     end_of_week = start_of_week + timedelta(days=7)
     
@@ -183,20 +179,29 @@ def get_nfl_predictions():
         probability = calculate_cover_probability(game, team_stats)
         favorite_stats = team_stats.get(game['favorite'])
         ats_record = "N/A"
+        
+        # --- THIS IS THE DEFINITIVE FIX ---
+        # Defensively handle potential missing or NaN values from the data
         if favorite_stats:
-            ats_record = f"{int(favorite_stats['ats_wins'])}-{int(favorite_stats['ats_losses'])}"
-            if favorite_stats['ats_pushes'] > 0:
-                 ats_record += f"-{int(favorite_stats['ats_pushes'])}"
+            wins = favorite_stats.get('ats_wins', 0)
+            losses = favorite_stats.get('ats_losses', 0)
+            pushes = favorite_stats.get('ats_pushes', 0)
 
-        # --- NEW LOGIC TO PICK THE WINNER AGAINST THE SPREAD ---
+            # Ensure values are not NaN before converting to int, default to 0
+            wins = 0 if pd.isna(wins) else int(wins)
+            losses = 0 if pd.isna(losses) else int(losses)
+            pushes = 0 if pd.isna(pushes) else int(pushes)
+
+            ats_record = f"{wins}-{losses}"
+            if pushes > 0:
+                ats_record += f"-{pushes}"
+        
         prediction_pick = "Too close to call"
-        # We use a small buffer (e.g., 52%) to make the pick more confident
         if probability > 52:
             line_str = f"{game['line']}" if game['line'] < 0 else f"+{game['line']}"
             prediction_pick = f"{game['favorite']} {line_str}"
         elif probability < 48:
             underdog = game['homeTeam'] if game['favorite'] == game['awayTeam'] else game['awayTeam']
-            # The underdog's line is the inverse of the favorite's line
             underdog_line = -game['line']
             line_str = f"{underdog_line}" if underdog_line < 0 else f"+{underdog_line}"
             prediction_pick = f"{underdog} {line_str}"
@@ -205,7 +210,7 @@ def get_nfl_predictions():
             **game, 
             'cover_probability': round(probability, 1), 
             'favorite_ats_record': ats_record,
-            'prediction_pick': prediction_pick  # Add the new pick to the response
+            'prediction_pick': prediction_pick
         })
     
     predictions.sort(key=lambda x: x['gameTime'])
