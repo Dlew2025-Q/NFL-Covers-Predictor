@@ -1,5 +1,5 @@
 import os
-from flask import Flask, jsonify, send_from_directory, abort
+from flask import Flask, jsonify, send_from_directory, abort, Blueprint
 from flask_cors import CORS
 import nfl_data_py as nfl
 import pandas as pd
@@ -23,13 +23,15 @@ cached_data = None
 last_fetch_time = None
 CACHE_DURATION_MINUTES = 30
 
-# --- DATA FETCHING AND PROCESSING ---
+# --- API BLUEPRINT (for better route organization) ---
+api_bp = Blueprint('api', __name__, url_prefix='/api')
 
+# --- DATA FETCHING AND PROCESSING ---
+# (All your data functions remain the same)
 def get_team_stats():
     """ Fetches the latest team statistics using nfl_data_py. """
     try:
         current_year = datetime.now().year
-        # Specifying columns can speed up the import
         cols = ['team', 'season', 'week', 'result', 'spread_line', 'points_for', 'points_against']
         df = nfl.import_weekly_data([current_year], columns=cols)
         
@@ -100,8 +102,8 @@ def calculate_cover_probability(game, all_team_stats):
     probability = 50 + (value_difference * 2.5)
     return max(5, min(95, probability))
 
-# --- API ENDPOINT ---
-@app.route('/api/nfl-predictions')
+# --- API ENDPOINT (now attached to the Blueprint) ---
+@api_bp.route('/nfl-predictions')
 def get_nfl_predictions():
     """ The main API endpoint that combines all data and returns predictions. """
     global cached_data, last_fetch_time
@@ -154,10 +156,14 @@ def get_nfl_predictions():
     app.logger.info(f"Successfully fetched and processed {len(predictions)} predictions.")
     return jsonify(predictions)
 
-# --- SERVE FRONTEND ---
-@app.route('/')
-def serve_index():
+# Register the Blueprint with the main Flask app
+app.register_blueprint(api_bp)
+
+# --- SERVE FRONTEND (Catch-all route) ---
+# This route will serve the index.html for any path not caught by the API blueprint.
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
     """ Serves the index.html file from the static folder. """
     return send_from_directory(app.static_folder, 'index.html')
-
 
