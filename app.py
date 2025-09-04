@@ -11,8 +11,13 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 # --- Initialize Flask App ---
-app = Flask(__name__, static_folder='static')
-CORS(app)
+app = Flask(__name__)
+
+# --- CORS Configuration ---
+# Allow requests from your frontend's domain
+frontend_url = os.environ.get('FRONTEND_URL', '*') # Use an env var for flexibility
+CORS(app, resources={r"/api/*": {"origins": frontend_url}})
+
 
 # --- CONFIGURATION ---
 THE_ODDS_API_KEY = os.environ.get('THE_ODDS_API_KEY')
@@ -23,13 +28,22 @@ last_fetch_time = None
 CACHE_DURATION_MINUTES = 30
 
 # --- DATA FETCHING AND PROCESSING ---
+
 def get_team_stats():
-    """ Fetches the latest team statistics using nfl_data_py. """
+    """ Fetches team statistics using nfl_data_py, handling the offseason. """
     try:
-        current_year = datetime.now().year
+        now = datetime.now()
+        # If it's before September, the new season hasn't started. Use last season's data.
+        current_year = now.year if now.month >= 9 else now.year - 1
+        app.logger.info(f"Fetching NFL stats for the {current_year} season.")
+
         cols = ['team', 'season', 'week', 'result', 'spread_line', 'points_for', 'points_against']
         df = nfl.import_weekly_data([current_year], columns=cols)
         
+        if df.empty:
+            app.logger.warning(f"No weekly data returned from nfl_data_py for {current_year}.")
+            return None
+
         df['ats_result'] = 'push'
         df.loc[df['result'] + df['spread_line'] > 0, 'ats_result'] = 'win'
         df.loc[df['result'] + df['spread_line'] < 0, 'ats_result'] = 'loss'
@@ -50,7 +64,7 @@ def get_team_stats():
         final_stats = {abbr_to_name[abbr]: data for abbr, data in team_stats_dict.items() if abbr in abbr_to_name}
         return final_stats
     except Exception as e:
-        app.logger.error(f"Error fetching stats from nfl_data_py: {e}")
+        app.logger.error(f"CRITICAL ERROR in get_team_stats: {e}", exc_info=True)
         return None
 
 def get_nfl_odds():
@@ -61,7 +75,7 @@ def get_nfl_odds():
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        app.logger.error(f"Error fetching odds from The Odds API: {e}")
+        app.logger.error(f"CRITICAL ERROR in get_nfl_odds: {e}", exc_info=True)
         return None
 
 def transform_api_data(api_games):
@@ -97,12 +111,6 @@ def calculate_cover_probability(game, all_team_stats):
     probability = 50 + (value_difference * 2.5)
     return max(5, min(95, probability))
 
-# --- HEALTH CHECK ROUTE (for debugging) ---
-@app.route('/health')
-def health_check():
-    """ A simple endpoint to confirm the server is running. """
-    return jsonify({"status": "ok"})
-
 # --- API ENDPOINT ---
 @app.route('/api/nfl-predictions')
 def get_nfl_predictions():
@@ -122,6 +130,7 @@ def get_nfl_predictions():
     odds_data = get_nfl_odds()
 
     if not team_stats or not odds_data:
+        app.logger.error(f"Failed to fetch data. Stats fetched: {'Yes' if team_stats else 'No'}. Odds fetched: {'Yes' if odds_data else 'No'}")
         abort(503, description="Failed to fetch data from one or more external sources.")
 
     all_games = transform_api_data(odds_data)
@@ -157,16 +166,9 @@ def get_nfl_predictions():
     app.logger.info(f"Successfully fetched and processed {len(predictions)} predictions.")
     return jsonify(predictions)
 
-# --- SERVE FRONTEND ---
+# --- SERVE A SIMPLE HEALTH CHECK at root ---
 @app.route('/')
-def serve_index():
-    """ Serves the main index.html file for the root URL. """
-    return send_from_directory(app.static_folder, 'index.html')
-
-# --- PRINT ROUTES AT STARTUP for debugging ---
-with app.app_context():
-    app.logger.info("--- REGISTERED ROUTES ---")
-    for rule in app.url_map.iter_rules():
-        app.logger.info(f"Endpoint: {rule.endpoint} -> URL: {rule.rule}")
-    app.logger.info("-------------------------")
+def health_check():
+    """ A simple health check to confirm the server is running. """
+    return "Backend is running."
 
