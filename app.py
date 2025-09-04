@@ -11,7 +11,6 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 # --- Initialize Flask App ---
-# The static_folder is pointed to the 'static' directory where index.html lives.
 app = Flask(__name__, static_folder='static')
 CORS(app)
 
@@ -27,7 +26,6 @@ CACHE_DURATION_MINUTES = 30
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
 # --- DATA FETCHING AND PROCESSING ---
-# (All your data functions remain the same)
 def get_team_stats():
     """ Fetches the latest team statistics using nfl_data_py. """
     try:
@@ -159,11 +157,9 @@ def get_nfl_predictions():
 # Register the Blueprint with the main Flask app
 app.register_blueprint(api_bp)
 
-# --- SERVE FRONTEND (Catch-all route) ---
-# This route will serve the index.html for any path not caught by the API blueprint.
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve(path):
-    """ Serves the index.html file from the static folder. """
+# --- SERVE FRONTEND (This is the corrected, simpler route) ---
+@app.route('/')
+def serve_index():
+    """ Serves the main index.html file for the root URL. """
     return send_from_directory(app.static_folder, 'index.html')
 
