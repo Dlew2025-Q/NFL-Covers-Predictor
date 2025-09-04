@@ -95,6 +95,7 @@ def get_team_stats():
 
 def get_nfl_odds():
     """ Fetches live NFL odds from The Odds API. """
+    # --- THIS IS THE CORRECTED LINE ---
     api_url = f"https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds/?apiKey={THE_ODDS_API_KEY}&regions=us&markets=spreads,h2h&oddsFormat=american"
     try:
         response = requests.get(api_url)
@@ -164,7 +165,6 @@ def get_nfl_predictions():
 
     all_games = transform_api_data(odds_data)
     
-    # --- THIS IS THE DEFINITIVE DATE LOGIC ---
     # Use timezone.utc to make all datetime objects 'aware' and comparable.
     today = datetime.now(timezone.utc)
     # Calculate the date of the most recent Thursday
@@ -220,5 +220,4 @@ def get_nfl_predictions():
 def health_check():
     """ A simple health check to confirm the server is running. """
     return "Backend is running."
-
 
