@@ -164,6 +164,7 @@ def get_nfl_predictions():
 
     all_games = transform_api_data(odds_data)
     
+    # --- THIS IS THE IMPROVED "LOOK AHEAD" LOGIC ---
     today = datetime.now(timezone.utc)
     start_of_week_date = today.date() - timedelta(days=((today.weekday() - 3) % 7))
     start_of_week = datetime.combine(start_of_week_date, datetime.min.time(), tzinfo=timezone.utc)
@@ -174,20 +175,27 @@ def get_nfl_predictions():
         if start_of_week <= datetime.fromisoformat(game['gameTime'].replace('Z', '+00:00')) < end_of_week
     ]
 
+    # If the current week is empty (e.g., it's a Tuesday/Wednesday), look for next week's games.
+    if not current_week_games:
+        app.logger.info("No games found for the current week. Looking ahead to next week.")
+        start_of_next_week = end_of_week
+        end_of_next_week = start_of_next_week + timedelta(days=7)
+        current_week_games = [
+            game for game in all_games 
+            if start_of_next_week <= datetime.fromisoformat(game['gameTime'].replace('Z', '+00:00')) < end_of_next_week
+        ]
+
     predictions = []
     for game in current_week_games:
         probability = calculate_cover_probability(game, team_stats)
         favorite_stats = team_stats.get(game['favorite'])
         ats_record = "N/A"
         
-        # --- THIS IS THE DEFINITIVE FIX ---
-        # Defensively handle potential missing or NaN values from the data
         if favorite_stats:
             wins = favorite_stats.get('ats_wins', 0)
             losses = favorite_stats.get('ats_losses', 0)
             pushes = favorite_stats.get('ats_pushes', 0)
 
-            # Ensure values are not NaN before converting to int, default to 0
             wins = 0 if pd.isna(wins) else int(wins)
             losses = 0 if pd.isna(losses) else int(losses)
             pushes = 0 if pd.isna(pushes) else int(pushes)
